@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# dados locais / mock (regeneráveis via db:push + db:seed)
+/dev.db
+/dev.db-journal
+/storage
+/backups
+/.tmp-test-backup
+
+# artefatos de teste
+/test-results
+/playwright-report

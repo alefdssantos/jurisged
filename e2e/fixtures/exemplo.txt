@@ -1,0 +1,2 @@
+Documento de exemplo para teste E2E do JurisGED.
+Conteúdo textual simples usado para validar upload e visualização.

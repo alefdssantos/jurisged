@@ -1,0 +1,20 @@
+# Referência de implantação single-node (escritório pequeno/médio).
+# Para escala/produção robusta, troque SQLite por PostgreSQL e o storage local
+# por object storage (S3/MinIO) — ver docs/OPERACAO.md.
+services:
+  jurisged:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:/data/dev.db
+    volumes:
+      - jurisged-data:/data # banco SQLite (persistente)
+      - jurisged-storage:/app/storage # arquivos e .eml (persistente)
+    restart: unless-stopped
+
+  # Coloque um reverse proxy (Caddy/Traefik/Nginx) na frente para TLS.
+
+volumes:
+  jurisged-data:
+  jurisged-storage:

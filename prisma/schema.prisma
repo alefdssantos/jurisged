@@ -1,0 +1,240 @@
+// JurisGED — modelo de dados (GED/DMS jurídico).
+// SQLite não suporta enums nativos: campos "enum" são String validados na app.
+// Campos JSON são armazenados como String (JSON.stringify).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------- Identidade / RBAC (espelha o AD; F8/F11) ----------
+
+model Usuario {
+  id       String   @id // mesmo id do mock/AD (ex.: "ana.silva")
+  nome     String
+  email    String   @unique
+  cargo    String
+  role     String // ADMIN | ADVOGADO | SECRETARIA | TI
+  ativo    Boolean  @default(true)
+  criadoEm DateTime @default(now())
+
+  grupos            Grupo[]     @relation("UsuarioGrupos")
+  documentosCriados Documento[] @relation("DocCriadoPor")
+  versoesCriadas    Versao[]    @relation("VersaoCriadoPor")
+  emailsCriados     Email[]     @relation("EmailCriadoPor")
+  auditorias        AuditLog[]
+}
+
+model Grupo {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  descricao String?
+  criadoEm  DateTime @default(now())
+
+  usuarios   Usuario[]   @relation("UsuarioGrupos")
+  permissoes Permissao[] @relation("GrupoPermissoes")
+  aclPastas  PastaAcl[]
+}
+
+model Permissao {
+  id        String  @id @default(cuid())
+  chave     String  @unique // ex.: documento.ler, documento.escrever, email.arquivar, admin.gerenciar
+  descricao String
+  grupos    Grupo[] @relation("GrupoPermissoes")
+}
+
+// ---------- Estrutura documental Cliente -> Processo -> Pasta ----------
+
+model Cliente {
+  id        String   @id @default(cuid())
+  nome      String
+  documento String? // CNPJ/CPF
+  email     String?
+  criadoEm  DateTime @default(now())
+
+  processos Processo[]
+}
+
+model Processo {
+  id        String   @id @default(cuid())
+  clienteId String
+  cliente   Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  numero    String? // número do processo (ex.: 0001234-55.2024.5.02.0001)
+  titulo    String
+  area      String? // Trabalhista, Cível, Tributário...
+  status    String   @default("ATIVO") // ATIVO | ARQUIVADO | SUSPENSO
+  criadoEm  DateTime @default(now())
+
+  pastas Pasta[]
+
+  @@index([clienteId])
+}
+
+model Pasta {
+  id         String   @id @default(cuid())
+  processoId String
+  processo   Processo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  parentId   String?
+  parent     Pasta?   @relation("PastaArvore", fields: [parentId], references: [id], onDelete: Cascade)
+  filhos     Pasta[]  @relation("PastaArvore")
+  nome       String
+  criadoEm   DateTime @default(now())
+
+  documentos Documento[]
+  emails     Email[]
+  acl        PastaAcl[]
+
+  @@index([processoId])
+  @@index([parentId])
+}
+
+model PastaAcl {
+  id      String @id @default(cuid())
+  pastaId String
+  pasta   Pasta  @relation(fields: [pastaId], references: [id], onDelete: Cascade)
+  grupoId String
+  grupo   Grupo  @relation(fields: [grupoId], references: [id], onDelete: Cascade)
+  nivel   String // LER | ESCREVER | ADMIN
+
+  @@unique([pastaId, grupoId])
+}
+
+// ---------- Classificação ----------
+
+model Categoria {
+  id         String      @id @default(cuid())
+  nome       String      @unique
+  documentos Documento[]
+}
+
+model Tag {
+  id         String      @id @default(cuid())
+  nome       String      @unique
+  cor        String      @default("neutral")
+  documentos Documento[] @relation("DocTags")
+  emails     Email[]     @relation("EmailTags")
+}
+
+// ---------- Documentos + versionamento + metadados ----------
+
+model Documento {
+  id            String     @id @default(cuid())
+  pastaId       String
+  pasta         Pasta      @relation(fields: [pastaId], references: [id], onDelete: Cascade)
+  nome          String
+  descricao     String?
+  categoriaId   String?
+  categoria     Categoria? @relation(fields: [categoriaId], references: [id])
+  criadoPorId   String?
+  criadoPor     Usuario?   @relation("DocCriadoPor", fields: [criadoPorId], references: [id])
+  origemEmailId String? // se gerado a partir de anexo de e-mail
+  origemEmail   Email?     @relation("EmailDocumentosGerados", fields: [origemEmailId], references: [id])
+  criadoEm      DateTime   @default(now())
+  atualizadoEm  DateTime   @updatedAt
+
+  versoes   Versao[]
+  tags      Tag[]           @relation("DocTags")
+  metadados MetadadoValor[]
+
+  @@index([pastaId])
+  @@index([categoriaId])
+}
+
+model Versao {
+  id          String    @id @default(cuid())
+  documentoId String
+  documento   Documento @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+  numero      Int
+  nomeArquivo String
+  mimeType    String
+  tamanho     Int
+  storagePath String
+  ocrText     String? // texto extraído por OCR (F6)
+  comentario  String?
+  atual       Boolean   @default(false)
+  criadoPorId String?
+  criadoPor   Usuario?  @relation("VersaoCriadoPor", fields: [criadoPorId], references: [id])
+  criadoEm    DateTime  @default(now())
+
+  @@unique([documentoId, numero])
+  @@index([documentoId])
+}
+
+model CampoPersonalizado {
+  id          String          @id @default(cuid())
+  nome        String          @unique
+  tipo        String // TEXTO | NUMERO | DATA | BOOLEANO | LISTA
+  opcoes      String? // JSON array (para LISTA)
+  obrigatorio Boolean         @default(false)
+  valores     MetadadoValor[]
+}
+
+model MetadadoValor {
+  id          String             @id @default(cuid())
+  documentoId String
+  documento   Documento          @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+  campoId     String
+  campo       CampoPersonalizado @relation(fields: [campoId], references: [id], onDelete: Cascade)
+  valor       String
+
+  @@unique([documentoId, campoId])
+  @@index([documentoId])
+}
+
+// ---------- Arquivamento de e-mail (F9) ----------
+
+model Email {
+  id            String   @id @default(cuid())
+  pastaId       String?
+  pasta         Pasta?   @relation(fields: [pastaId], references: [id], onDelete: SetNull)
+  messageId     String?
+  assunto       String
+  remetente     String
+  destinatarios String // JSON array
+  cc            String? // JSON array
+  dataEnvio     DateTime
+  corpoTexto    String
+  corpoHtml     String?
+  emlPath       String // .eml original preservado (fidelidade total)
+  criadoPorId   String?
+  criadoPor     Usuario? @relation("EmailCriadoPor", fields: [criadoPorId], references: [id])
+  criadoEm      DateTime @default(now())
+
+  anexos            Anexo[]
+  tags              Tag[]       @relation("EmailTags")
+  documentosGerados Documento[] @relation("EmailDocumentosGerados")
+
+  @@index([pastaId])
+}
+
+model Anexo {
+  id          String  @id @default(cuid())
+  emailId     String
+  email       Email   @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  nome        String
+  mimeType    String
+  tamanho     Int
+  storagePath String
+
+  @@index([emailId])
+}
+
+// ---------- Rastreabilidade / auditoria (F10) ----------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  usuarioId  String?
+  usuario    Usuario? @relation(fields: [usuarioId], references: [id])
+  acao       String // CRIAR | EDITAR | EXCLUIR | VISUALIZAR | VERSIONAR | ARQUIVAR_EMAIL | LOGIN
+  entidade   String // Documento | Pasta | Email | Cliente | Processo | Usuario
+  entidadeId String?
+  detalhe    String? // JSON
+  criadoEm   DateTime @default(now())
+
+  @@index([entidade, entidadeId])
+  @@index([usuarioId])
+}
