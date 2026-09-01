@@ -5,10 +5,23 @@ import path from "node:path";
  * Armazenamento local de arquivos (mock de produção — sem S3/credenciais).
  * `storagePath` é relativo à raiz do projeto e inclui o prefixo "storage/".
  */
-const ROOT = process.cwd();
+const STORAGE_ROOT = path.resolve(process.cwd(), "storage");
 
 export function caminhoAbsoluto(rel: string): string {
-  return path.join(ROOT, rel);
+  const normalized = path.normalize(rel.replace(/[\\/]+/g, path.sep));
+  const prefix = `storage${path.sep}`;
+
+  if (path.isAbsolute(normalized) || (normalized !== "storage" && !normalized.startsWith(prefix))) {
+    throw new Error("Caminho de armazenamento inválido.");
+  }
+
+  const storageRelative = normalized === "storage" ? "" : normalized.slice(prefix.length);
+  const absolute = path.resolve(STORAGE_ROOT, storageRelative);
+  if (absolute !== STORAGE_ROOT && !absolute.startsWith(`${STORAGE_ROOT}${path.sep}`)) {
+    throw new Error("Caminho de armazenamento inválido.");
+  }
+
+  return absolute;
 }
 
 export async function salvarArquivo(
